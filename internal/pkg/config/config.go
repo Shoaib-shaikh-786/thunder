@@ -4,22 +4,24 @@ import (
 	"fmt"
 	"os"
 	"strings"
-	"time"
 
 	"github.com/joho/godotenv"
 )
 
 type Config struct {
 	ApplicationConfig ApplicationConfig
+	DBConfig          DBConfig
 }
 
 type ApplicationConfig struct {
-	Environment  string
-	ServerPort   string
-	ServerHost   string
-	LogLevel     string
-	JWTSecretKey string
-	JWTTokenTTL  time.Duration
+	Environment string
+	ServerPort  string
+	ServerHost  string
+	LogLevel    string
+}
+
+type DBConfig struct {
+	DSN string // full NeonDB connection string from env
 }
 
 func LoadConfig(envFile ...string) (*Config, error) {
@@ -35,19 +37,16 @@ func LoadConfig(envFile ...string) (*Config, error) {
 			return nil, fmt.Errorf("failed to load .env file: %w", err)
 		}
 	}
-	jwtTokenTTL, err := time.ParseDuration(getEnv("JWT_TOKEN_TTL", "24h"))
-	if err != nil {
-		return nil, fmt.Errorf("invalid JWT_TOKEN_TTL: %w", err)
-	}
 
 	config := &Config{
 		ApplicationConfig: ApplicationConfig{
-			Environment:  getEnv("ENV", "local"),
-			ServerPort:   getEnv("SERVER_PORT", "8080"),
-			ServerHost:   getEnv("SERVER_HOST", "0.0.0.0"),
-			LogLevel:     getEnv("LOG_LEVEL", "info"),
-			JWTSecretKey: getEnv("JWT_SECRET_KEY", "your-secret-key-here"),
-			JWTTokenTTL:  jwtTokenTTL,
+			Environment: getEnv("ENV", "local"),
+			ServerPort:  getEnv("SERVER_PORT", "8080"),
+			ServerHost:  getEnv("SERVER_HOST", "0.0.0.0"),
+			LogLevel:    getEnv("LOG_LEVEL", "info"),
+		},
+		DBConfig: DBConfig{
+			DSN: getEnv("DATABASE_URL", ""),
 		},
 	}
 
@@ -65,11 +64,8 @@ func getEnv(key, defaultValue string) string {
 }
 
 func (c *Config) validate() error {
-	if strings.TrimSpace(c.ApplicationConfig.JWTSecretKey) == "" {
-		return fmt.Errorf("JWT_SECRET_KEY cannot be empty")
-	}
-	if c.ApplicationConfig.JWTTokenTTL <= 0 {
-		return fmt.Errorf("JWT_TOKEN_TTL must be greater than zero")
+	if c.DBConfig.DSN == "" {
+		return fmt.Errorf("DATABASE_URL is required")
 	}
 	return nil
 }

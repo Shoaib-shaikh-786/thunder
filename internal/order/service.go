@@ -1,0 +1,225 @@
+package order
+
+import (
+	"context"
+	"fmt"
+	"time"
+
+	"github.com/google/uuid"
+)
+
+type Service struct {
+	repo *Repository
+}
+
+func NewService(repo *Repository) *Service {
+	return &Service{repo: repo}
+}
+
+// ── Create ────────────────────────────────────────────────────────────────────
+
+// CreateOrder is called by dealer or salesman.
+// placedByID   = the user placing the order (dealer or salesman)
+// placedByType = "dealer" | "salesman"
+// dealerID     = the dealer this order belongs to
+//
+//	(for dealer: same as placedByID's user record)
+//	(for salesman: taken from salesman's dealer_id claim)
+func (s *Service) CreateOrder(
+	ctx context.Context,
+	wholesalerID, dealerID, placedByID, placedByType string,
+	req CreateOrderRequest,
+) (*Order, error) {
+	// Validate dealer has a saved address — required for shipping
+	addr, err := s.repo.GetUserAddress(ctx, dealerID)
+	if err != nil {
+		return nil, fmt.Errorf("fetch dealer address: %w", err)
+	}
+	if addr == nil {
+		return nil, fmt.Errorf("dealer has no saved address; please update profile before placing an order")
+	}
+
+	// Snapshot each product from the wholesaler's catalog
+	var items []*OrderItem
+	var orderValue int64
+
+	for _, reqItem := range req.Items {
+		snapshot, err := s.repo.GetProductSnapshot(ctx, reqItem.ProductID, wholesalerID)
+		if err != nil {
+			return nil, err
+		}
+		snapshot.Quantity = reqItem.Quantity
+		orderValue += snapshot.Price * reqItem.Quantity
+		items = append(items, snapshot)
+	}
+
+	now := time.Now().UnixMilli()
+	o := &Order{
+		ID:              uuid.New().String(),
+		WholesalerID:    wholesalerID,
+		DealerID:        dealerID,
+		PlacedByID:      placedByID,
+		PlacedByType:    placedByType,
+		Status:          OrderStatusPending,
+		Items:           items,
+		OrderValue:      orderValue,
+		ShippingAddress: addr, // snapshot at order time
+		Notes:           []*Note{},
+		CreatedAt:       now,
+		UpdatedAt:       now,
+	}
+
+	// Attach delivery note if provided (salesman use case)
+	if req.Note != "" {
+		o.Notes = append(o.Notes, &Note{
+			AuthorID:   placedByID,
+			AuthorType: placedByType,
+			Message:    req.Note,
+			CreatedAt:  now,
+		})
+	}
+
+	if err := s.repo.Create(ctx, o); err != nil {
+		return nil, fmt.Errorf("create order: %w", err)
+	}
+
+	return o, nil
+}
+
+// ── Status Transitions ────────────────────────────────────────────────────────
+
+// AcceptOrder — Wholesaler only. Sets ETD at this point.
+func (s *Service) AcceptOrder(ctx context.Context, wholesalerID, orderID string, req AcceptOrderRequest) error {
+	o, err := s.getAndValidate(ctx, orderID, wholesalerID)
+	if err != nil {
+		return err
+	}
+	if o.Status != OrderStatusPending {
+		return fmt.Errorf("can only accept a pending order, current status: %s", o.Status)
+	}
+	return s.repo.UpdateStatus(ctx, orderID, wholesalerID, OrderStatusAccepted, &req.ETD)
+}
+
+// RejectOrder — Wholesaler only.
+func (s *Service) RejectOrder(ctx context.Context, wholesalerID, orderID string) error {
+	o, err := s.getAndValidate(ctx, orderID, wholesalerID)
+	if err != nil {
+		return err
+	}
+	if o.Status != OrderStatusPending {
+		return fmt.Errorf("can only reject a pending order, current status: %s", o.Status)
+	}
+	return s.repo.UpdateStatus(ctx, orderID, wholesalerID, OrderStatusRejected, nil)
+}
+
+// CompleteOrder — Wholesaler only. Final state after shipped.
+func (s *Service) CompleteOrder(ctx context.Context, wholesalerID, orderID string) error {
+	o, err := s.getAndValidate(ctx, orderID, wholesalerID)
+	if err != nil {
+		return err
+	}
+	if o.Status != OrderStatusShipped {
+		return fmt.Errorf("can only complete a shipped order, current status: %s", o.Status)
+	}
+	return s.repo.UpdateStatus(ctx, orderID, wholesalerID, OrderStatusCompleted, nil)
+}
+
+// ProcessOrder — Staff only.
+func (s *Service) ProcessOrder(ctx context.Context, wholesalerID, orderID string) error {
+	o, err := s.getAndValidate(ctx, orderID, wholesalerID)
+	if err != nil {
+		return err
+	}
+	if o.Status != OrderStatusAccepted {
+		return fmt.Errorf("can only process an accepted order, current status: %s", o.Status)
+	}
+	return s.repo.UpdateStatus(ctx, orderID, wholesalerID, OrderStatusProcessing, nil)
+}
+
+// ShipOrder — Staff only.
+func (s *Service) ShipOrder(ctx context.Context, wholesalerID, orderID string) error {
+	o, err := s.getAndValidate(ctx, orderID, wholesalerID)
+	if err != nil {
+		return err
+	}
+	if o.Status != OrderStatusProcessing {
+		return fmt.Errorf("can only ship a processing order, current status: %s", o.Status)
+	}
+	return s.repo.UpdateStatus(ctx, orderID, wholesalerID, OrderStatusShipped, nil)
+}
+
+// CancelOrder — Dealer only, only from pending.
+func (s *Service) CancelOrder(ctx context.Context, wholesalerID, dealerID, orderID string) error {
+	o, err := s.getAndValidate(ctx, orderID, wholesalerID)
+	if err != nil {
+		return err
+	}
+	if o.DealerID != dealerID {
+		return fmt.Errorf("order does not belong to this dealer")
+	}
+	if o.Status != OrderStatusPending {
+		return fmt.Errorf("can only cancel a pending order, current status: %s", o.Status)
+	}
+	return s.repo.UpdateStatus(ctx, orderID, wholesalerID, OrderStatusCancelled, nil)
+}
+
+// ── Notes ─────────────────────────────────────────────────────────────────────
+
+// AddNote — Dealer only, any status.
+func (s *Service) AddNote(ctx context.Context, wholesalerID, dealerID, orderID string, req AddNoteRequest) error {
+	o, err := s.getAndValidate(ctx, orderID, wholesalerID)
+	if err != nil {
+		return err
+	}
+	if o.DealerID != dealerID {
+		return fmt.Errorf("order does not belong to this dealer")
+	}
+
+	note := &Note{
+		AuthorID:   dealerID,
+		AuthorType: "dealer",
+		Message:    req.Message,
+		CreatedAt:  time.Now().UnixMilli(),
+	}
+	return s.repo.AddNote(ctx, orderID, wholesalerID, note)
+}
+
+// ── Read ──────────────────────────────────────────────────────────────────────
+
+func (s *Service) GetByID(ctx context.Context, wholesalerID, orderID string) (*Order, error) {
+	return s.getAndValidate(ctx, orderID, wholesalerID)
+}
+
+func (s *Service) List(ctx context.Context, f ListOrdersFilter) (*ListOrdersResponse, error) {
+	if f.Page < 1 {
+		f.Page = 1
+	}
+	if f.PageSize < 1 || f.PageSize > 100 {
+		f.PageSize = 20
+	}
+
+	orders, total, err := s.repo.List(ctx, f)
+	if err != nil {
+		return nil, err
+	}
+
+	return &ListOrdersResponse{
+		Orders:   orders,
+		Total:    total,
+		Page:     f.Page,
+		PageSize: f.PageSize,
+	}, nil
+}
+
+// ── Internal ──────────────────────────────────────────────────────────────────
+
+func (s *Service) getAndValidate(ctx context.Context, orderID, wholesalerID string) (*Order, error) {
+	o, err := s.repo.GetByID(ctx, orderID, wholesalerID)
+	if err != nil {
+		return nil, err
+	}
+	if o == nil {
+		return nil, fmt.Errorf("order not found")
+	}
+	return o, nil
+}

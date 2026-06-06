@@ -7,19 +7,24 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-var publicPath = []string{
+var publicPaths = []string{
 	"/health",
-	"/auth/register",
 	"/auth/login",
-	"/auth/verify",
-	"/auth/forgotPassword",
-	"/auth/resetPassword",
-	"/tenants",
+	"/auth/dealer/join",
+}
+
+var publicPathPrefixes = []string{
+	"/api/mock",
 }
 
 func isPublicPath(path string) bool {
-	for _, p := range publicPath {
+	for _, p := range publicPaths {
 		if path == p {
+			return true
+		}
+	}
+	for _, prefix := range publicPathPrefixes {
+		if strings.HasPrefix(path, prefix) {
 			return true
 		}
 	}
@@ -52,12 +57,11 @@ func AuthMiddleware(authService BaseAuthService) gin.HandlerFunc {
 
 		claim, err := authService.ValidateToken(token)
 		if err != nil {
-			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "invalid token"})
+			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "invalid or expired token"})
 			return
 		}
 
 		c.Set("user_claim", claim)
-
 		c.Next()
 	}
 }
