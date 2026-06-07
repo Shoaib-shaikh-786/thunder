@@ -10,6 +10,7 @@ import (
 var publicPaths = []string{
 	"/health",
 	"/auth/login",
+	"/auth/role",
 	"/auth/dealer/join",
 }
 

@@ -140,3 +140,85 @@ func generateSecureToken() (string, error) {
 	}
 	return hex.EncodeToString(b), nil
 }
+
+// createUser is the shared internal factory for salesman and staff.
+func (s *Service) createUserUnderWholesaler(
+	ctx context.Context,
+	wholesalerID string,
+	phone, pin string,
+	userType UserType,
+) (*LoginResponse, error) {
+	existing, err := s.repo.GetUserByPhone(ctx, phone)
+	if err != nil {
+		return nil, err
+	}
+	if existing != nil {
+		return nil, fmt.Errorf("phone already registered")
+	}
+
+	pinHash, err := bcrypt.GenerateFromPassword([]byte(pin), bcrypt.DefaultCost)
+	if err != nil {
+		return nil, fmt.Errorf("failed to hash PIN: %w", err)
+	}
+
+	u := &User{
+		ID:           uuid.New().String(),
+		Phone:        phone,
+		PinHash:      string(pinHash),
+		Type:         userType,
+		WholesalerID: wholesalerID,
+		CreatedAt:    time.Now(),
+	}
+	if err := s.repo.CreateUser(ctx, u); err != nil {
+		return nil, fmt.Errorf("failed to create user: %w", err)
+	}
+
+	return &LoginResponse{UserID: u.ID, UserType: u.Type}, nil
+}
+
+func (s *Service) CreateSalesman(ctx context.Context, wholesalerID string, req CreateSalesmanRequest) (*LoginResponse, error) {
+	return s.createUserUnderWholesaler(ctx, wholesalerID, req.Phone, req.PIN, UserTypeSalesman)
+}
+
+func (s *Service) CreateStaff(ctx context.Context, wholesalerID string, req CreateStaffRequest) (*LoginResponse, error) {
+	return s.createUserUnderWholesaler(ctx, wholesalerID, req.Phone, req.PIN, UserTypeStaff)
+}
+
+// DeleteUser hard-deletes a salesman or staff, enforcing wholesaler ownership.
+func (s *Service) DeleteUser(ctx context.Context, wholesalerID, targetID string, expectedType UserType) error {
+	return s.repo.DeleteUserByIDAndWholesaler(ctx, targetID, wholesalerID, expectedType)
+}
+
+// UpdateDealer updates phone and/or PIN.
+// Wholesalers must own the dealer; dealers can only touch themselves (enforced in handler).
+func (s *Service) UpdateDealer(ctx context.Context, claims *Claims, targetID string, req UpdateDealerRequest) error {
+	// For wholesalers, scope the update to their dealer. For dealers updating
+	// themselves, wholesalerID scoping is implicit (targetID == claims.UserID).
+	wholesalerID := ""
+	if claims.Type == UserTypeWholesaler {
+		wholesalerID = claims.UserID
+	}
+
+	var newHash *string
+	if req.PIN != nil {
+		h, err := bcrypt.GenerateFromPassword([]byte(*req.PIN), bcrypt.DefaultCost)
+		if err != nil {
+			return fmt.Errorf("failed to hash PIN: %w", err)
+		}
+		s := string(h)
+		newHash = &s
+	}
+
+	return s.repo.UpdateDealer(ctx, targetID, wholesalerID, req.Phone, newHash)
+}
+
+func (s *Service) GetRoleByPhone(ctx context.Context, req RoleLookupRequest) (*RoleLookupResult, error) {
+	result, err := s.repo.GetRoleByPhone(ctx, req.Phone)
+	if err != nil {
+		return nil, err
+	}
+	if result == nil {
+		return nil, fmt.Errorf("no account found for this phone number")
+	}
+	return result, nil
+}

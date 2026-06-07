@@ -67,3 +67,25 @@ type DealerJoinRequest struct {
 	Phone       string `json:"phone"        binding:"required"`
 	PIN         string `json:"pin"          binding:"required"`
 }
+
+type CreateStaffRequest struct {
+	Phone string `json:"phone" binding:"required"`
+	PIN   string `json:"pin"   binding:"required"`
+}
+
+// Reuse CreateStaffRequest for salesman too — same shape.
+type CreateSalesmanRequest = CreateStaffRequest
+
+type UpdateDealerRequest struct {
+	Phone *string `json:"phone"` // nil = no change
+	PIN   *string `json:"pin"`
+}
+
+type RoleLookupResult struct {
+	Role           UserType `json:"role"`
+	WholesalerName string   `json:"wholesaler_name"`
+}
+
+type RoleLookupRequest struct {
+	Phone string `json:"phone" binding:"required"`
+}
