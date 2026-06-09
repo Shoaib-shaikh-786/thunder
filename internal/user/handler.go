@@ -2,6 +2,7 @@ package user
 
 import (
 	"net/http"
+	"strconv"
 	"strings"
 
 	"github.com/gin-gonic/gin"
@@ -15,27 +16,56 @@ func NewHandler(service *Service) *Handler {
 	return &Handler{service: service}
 }
 
-// RegisterRoutes mounts all auth + user routes onto the router.
-func (h *Handler) RegisterRoutes(r *gin.Engine) {
+// RegisterRoutes mounts all auth + user routes onto the router
+func (h *Handler) RegisterRoutes(r *gin.RouterGroup) {
 	auth := r.Group("/auth")
 	{
+		auth.POST("/check", h.CheckAuth)
+		auth.POST("/verify", h.VerifyAuth)
 		auth.POST("/login", h.Login)
 		auth.POST("/role", h.GetRole)
 		auth.POST("/logout", h.Logout)
-		auth.POST("/dealer/join", h.DealerJoin) // QR invite registration
 	}
 
-	// Wholesaler-only: generate dealer invite QR
-	r.POST("/dealers/invite", h.GenerateInvite)
+	users := r.Group("/users")
+	{
+		users.PATCH(":id", h.UpdateUser)
+		users.DELETE(":id", h.DeleteUser)
+	}
+}
 
-	// Wholesaler-only: manage salesmen and staff
-	r.POST("/salesmen", h.CreateSalesman)
-	r.DELETE("/salesmen/:id", h.DeleteSalesman)
-	r.POST("/staff", h.CreateStaff)
-	r.DELETE("/staff/:id", h.DeleteStaff)
+// POST /auth/check
+func (h *Handler) CheckAuth(c *gin.Context) {
+	var req AuthCheckRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
 
-	// Dealer update: wholesaler OR the dealer themselves
-	r.PATCH("/dealers/:id", h.UpdateDealer)
+	resp, err := h.service.CheckAuth(c.Request.Context(), req)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, resp)
+}
+
+// POST /auth/verify
+func (h *Handler) VerifyAuth(c *gin.Context) {
+	var req AuthVerifyRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	resp, err := h.service.VerifyAuth(c.Request.Context(), req)
+	if err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, resp)
 }
 
 // POST /auth/login
@@ -55,6 +85,23 @@ func (h *Handler) Login(c *gin.Context) {
 	c.JSON(http.StatusOK, resp)
 }
 
+// POST /auth/role
+func (h *Handler) GetRole(c *gin.Context) {
+	var req GetRoleRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	resp, err := h.service.GetRole(c.Request.Context(), req)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, resp)
+}
+
 // POST /auth/logout
 func (h *Handler) Logout(c *gin.Context) {
 	authHeader := c.GetHeader("Authorization")
@@ -68,45 +115,7 @@ func (h *Handler) Logout(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "logged out"})
 }
 
-// POST /dealers/invite  — wholesaler only
-func (h *Handler) GenerateInvite(c *gin.Context) {
-	claims, ok := getClaims(c)
-	if !ok {
-		return
-	}
-
-	if claims.Type != UserTypeWholesaler {
-		c.JSON(http.StatusForbidden, gin.H{"error": "only wholesalers can generate invites"})
-		return
-	}
-
-	resp, err := h.service.GenerateInvite(c.Request.Context(), claims.UserID)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		return
-	}
-
-	c.JSON(http.StatusOK, resp)
-}
-
-// POST /auth/dealer/join  — public, uses invite token from QR
-func (h *Handler) DealerJoin(c *gin.Context) {
-	var req DealerJoinRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-		return
-	}
-
-	resp, err := h.service.DealerJoin(c.Request.Context(), req)
-	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-		return
-	}
-
-	c.JSON(http.StatusOK, resp)
-}
-
-// getClaims is a helper to extract validated claims from gin context.
+// getClaims extracts validated claims from gin context
 func getClaims(c *gin.Context) (*Claims, bool) {
 	val, exists := c.Get("user_claim")
 	if !exists {
@@ -121,158 +130,62 @@ func getClaims(c *gin.Context) (*Claims, bool) {
 	return claims, true
 }
 
-// POST /salesmen — wholesaler only
-func (h *Handler) CreateSalesman(c *gin.Context) {
+// PATCH /users/:id
+func (h *Handler) UpdateUser(c *gin.Context) {
 	claims, ok := getClaims(c)
 	if !ok {
 		return
 	}
-	if claims.Type != UserTypeWholesaler {
-		c.JSON(http.StatusForbidden, gin.H{"error": "wholesalers only"})
+
+	userID, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid user id"})
 		return
 	}
 
-	var req CreateSalesmanRequest
+	var req User
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 
-	resp, err := h.service.CreateSalesman(c.Request.Context(), claims.UserID, req)
-	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-		return
-	}
-	c.JSON(http.StatusCreated, resp)
-}
-
-// DELETE /salesmen/:id — wholesaler only
-func (h *Handler) DeleteSalesman(c *gin.Context) {
-	claims, ok := getClaims(c)
-	if !ok {
-		return
-	}
-	if claims.Type != UserTypeWholesaler {
-		c.JSON(http.StatusForbidden, gin.H{"error": "wholesalers only"})
-		return
-	}
-
-	if err := h.service.DeleteUser(c.Request.Context(), claims.UserID, c.Param("id"), UserTypeSalesman); err != nil {
-		status := http.StatusInternalServerError
-		if err.Error() == "not found or not yours" {
-			status = http.StatusNotFound
-		}
-		c.JSON(status, gin.H{"error": err.Error()})
-		return
-	}
-	c.Status(http.StatusNoContent)
-}
-
-// POST /staff — wholesaler only
-func (h *Handler) CreateStaff(c *gin.Context) {
-	claims, ok := getClaims(c)
-	if !ok {
-		return
-	}
-	if claims.Type != UserTypeWholesaler {
-		c.JSON(http.StatusForbidden, gin.H{"error": "wholesalers only"})
-		return
-	}
-
-	var req CreateStaffRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-		return
-	}
-
-	resp, err := h.service.CreateStaff(c.Request.Context(), claims.UserID, req)
-	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-		return
-	}
-	c.JSON(http.StatusCreated, resp)
-}
-
-// DELETE /staff/:id — wholesaler only
-func (h *Handler) DeleteStaff(c *gin.Context) {
-	claims, ok := getClaims(c)
-	if !ok {
-		return
-	}
-	if claims.Type != UserTypeWholesaler {
-		c.JSON(http.StatusForbidden, gin.H{"error": "wholesalers only"})
-		return
-	}
-
-	if err := h.service.DeleteUser(c.Request.Context(), claims.UserID, c.Param("id"), UserTypeStaff); err != nil {
-		status := http.StatusInternalServerError
-		if err.Error() == "not found or not yours" {
-			status = http.StatusNotFound
-		}
-		c.JSON(status, gin.H{"error": err.Error()})
-		return
-	}
-	c.Status(http.StatusNoContent)
-}
-
-// PATCH /dealers/:id — wholesaler (any of their dealers) OR dealer (themselves only)
-func (h *Handler) UpdateDealer(c *gin.Context) {
-	claims, ok := getClaims(c)
-	if !ok {
-		return
-	}
-
-	targetID := c.Param("id")
-
-	// Dealers can only update themselves
-	if claims.Type == UserTypeDealer && claims.UserID != targetID {
-		c.JSON(http.StatusForbidden, gin.H{"error": "dealers can only update their own profile"})
-		return
-	}
-
-	// Salesmen/staff cannot update dealers
-	if claims.Type != UserTypeWholesaler && claims.Type != UserTypeDealer {
+	// Only allow users to update themselves or admins to update anyone
+	if claims.UserID != userID && claims.Type != string(UserTypeAdmin) {
 		c.JSON(http.StatusForbidden, gin.H{"error": "forbidden"})
 		return
 	}
 
-	var req UpdateDealerRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-		return
-	}
-	if req.Phone == nil && req.PIN == nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "nothing to update"})
+	if err := h.service.UpdateUser(c.Request.Context(), userID, &req); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
 
-	if err := h.service.UpdateDealer(c.Request.Context(), claims, targetID, req); err != nil {
-		status := http.StatusInternalServerError
-		if err.Error() == "not found or not yours" {
-			status = http.StatusNotFound
-		}
-		c.JSON(status, gin.H{"error": err.Error()})
-		return
-	}
-	c.Status(http.StatusNoContent)
+	c.JSON(http.StatusOK, gin.H{"message": "user updated"})
 }
 
-// POST /auth/role  — public route, no token required
-// Request:  { "phone": "8287263475" }
-// Response: { "role": "dealer", "wholesaler_name": "Sharma Traders" }
-func (h *Handler) GetRole(c *gin.Context) {
-	var req RoleLookupRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+// DELETE /users/:id
+func (h *Handler) DeleteUser(c *gin.Context) {
+	claims, ok := getClaims(c)
+	if !ok {
 		return
 	}
 
-	result, err := h.service.GetRoleByPhone(c.Request.Context(), req)
+	userID, err := strconv.ParseInt(c.Param("id"), 10, 64)
 	if err != nil {
-		// Return 404 so frontend knows to show "phone not registered"
-		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid user id"})
 		return
 	}
 
-	c.JSON(http.StatusOK, result)
+	// Only admins can delete users
+	if claims.Type != string(UserTypeAdmin) {
+		c.JSON(http.StatusForbidden, gin.H{"error": "forbidden"})
+		return
+	}
+
+	if err := h.service.DeleteUser(c.Request.Context(), userID); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "user deleted"})
 }

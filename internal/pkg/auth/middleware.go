@@ -9,9 +9,12 @@ import (
 
 var publicPaths = []string{
 	"/health",
-	"/auth/login",
-	"/auth/role",
-	"/auth/dealer/join",
+	"/api/v1/auth/login",
+	"/api/v1/auth/role",
+	"/api/v1/auth/check",
+	"/api/v1/auth/verify",
+	"/api/v1/auth/signup",
+	"/api/v1/tenants/verify",
 }
 
 var publicPathPrefixes = []string{

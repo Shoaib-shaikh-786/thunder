@@ -14,6 +14,7 @@ import (
 	"backend/internal/pkg/db"
 	"backend/internal/pkg/log"
 	"backend/internal/product"
+	"backend/internal/tenant"
 	"backend/internal/user"
 )
 
@@ -54,22 +55,21 @@ func main() {
 	orderService := order.NewService(orderRepo)
 	orderHandler := order.NewHandler(orderService)
 
+	// Tenant layer
+	tenantRepo := tenant.NewRepository(pool)
+	tenantService := tenant.NewService(tenantRepo)
+	tenantHandler := tenant.NewHandler(tenantService)
+
 	// Auth middleware — wraps session token validation
 	authService = auth.NewSessionAuthService(func(ctx context.Context, token string) (*auth.Claims, error) {
 		c, err := userService.ValidateToken(ctx, token)
 		if err != nil {
 			return nil, err
 		}
-		return &auth.Claims{
-			UserID:       c.UserID,
-			Phone:        c.Phone,
-			Type:         string(c.Type),
-			WholesalerID: c.WholesalerID,
-			DealerID:     c.DealerID,
-		}, nil
+		return c, nil
 	})
 
-	router := initialiseRouter(userHandler, productHandler, orderHandler)
+	router := initialiseRouter(userHandler, productHandler, orderHandler, tenantHandler)
 	if err := router.Run(fmt.Sprintf("%s:%s", cfg.ApplicationConfig.ServerHost, cfg.ApplicationConfig.ServerPort)); err != nil {
 		log.ErrorWithContext(ctx, fmt.Sprintf("failed to start server: %v", err))
 	}
@@ -79,6 +79,7 @@ func initialiseRouter(
 	userHandler *user.Handler,
 	productHandler *product.Handler,
 	orderHandler *order.Handler,
+	tenantHandler *tenant.Handler,
 ) *gin.Engine {
 	r := gin.Default()
 
@@ -96,9 +97,12 @@ func initialiseRouter(
 		c.JSON(200, gin.H{"status": "ok"})
 	})
 
-	userHandler.RegisterRoutes(r)
-	productHandler.RegisterRoutes(r)
-	orderHandler.RegisterRoutes(r)
+	api := r.Group("/api/v1")
+
+	userHandler.RegisterRoutes(api)
+	productHandler.RegisterRoutes(api)
+	orderHandler.RegisterRoutes(api)
+	tenantHandler.RegisterRoutes(api)
 
 	return r
 }
