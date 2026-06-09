@@ -16,10 +16,10 @@ func NewService(repo *Repository) *Service {
 	return &Service{repo: repo}
 }
 
-func (s *Service) Create(ctx context.Context, wholesalerID string, req CreateProductRequest) (*Product, error) {
+func (s *Service) Create(ctx context.Context, tenantID string, req CreateProductRequest) (*Product, error) {
 	p := &Product{
 		ID:                 uuid.New().String(),
-		WholesalerID:       wholesalerID, // always from token, never from request
+		TenantID:           tenantID, // always from token, never from request
 		Name:               req.Name,
 		Quantity:           int(req.Quantity),
 		Category:           req.Category,
@@ -39,17 +39,16 @@ func (s *Service) Create(ctx context.Context, wholesalerID string, req CreatePro
 	return p, nil
 }
 
-func (s *Service) Update(ctx context.Context, wholesalerID, productID string, req UpdateProductRequest) error {
-	// wholesaler_id check is enforced in the DB query (WHERE wholesaler_id = ?)
-	return s.repo.Update(ctx, productID, wholesalerID, req)
+func (s *Service) Update(ctx context.Context, tenantID, productID string, req UpdateProductRequest) error {
+	return s.repo.Update(ctx, productID, tenantID, req)
 }
 
-func (s *Service) Delete(ctx context.Context, wholesalerID, productID string) error {
-	return s.repo.Delete(ctx, productID, wholesalerID)
+func (s *Service) Delete(ctx context.Context, tenantID, productID string) error {
+	return s.repo.Delete(ctx, productID, tenantID)
 }
 
-func (s *Service) GetByID(ctx context.Context, wholesalerID, productID string) (*Product, error) {
-	p, err := s.repo.GetByID(ctx, productID, wholesalerID)
+func (s *Service) GetByID(ctx context.Context, tenantID, productID string) (*Product, error) {
+	p, err := s.repo.GetByID(ctx, productID, tenantID)
 	if err != nil {
 		return nil, err
 	}

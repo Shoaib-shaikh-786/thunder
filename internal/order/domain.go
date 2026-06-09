@@ -34,19 +34,19 @@ type Note struct {
 }
 
 type Order struct {
-	ID              string         `json:"id"`
-	WholesalerID    string         `json:"wholesaler_id"`
-	DealerID        string         `json:"dealer_id"`
-	PlacedByID      string         `json:"placed_by_id"`
-	PlacedByType    string         `json:"placed_by_type"`
-	Status          OrderStatus    `json:"status"`
-	Items           []*OrderItem   `json:"items"`
-	OrderValue      int64          `json:"order_value"`
+	ID              string          `json:"id"`
+	TenantID        string          `json:"tenant_id"`
+	BuyerID         string          `json:"buyer_id"`
+	PlacedByID      string          `json:"placed_by_id"`
+	PlacedByType    string          `json:"placed_by_type"`
+	Status          OrderStatus     `json:"status"`
+	Items           []*OrderItem    `json:"items"`
+	OrderValue      int64           `json:"order_value"`
 	ShippingAddress *domain.Address `json:"shipping_address"`
-	ETD             *time.Time     `json:"etd"`
-	Notes           []*Note        `json:"notes"`
-	CreatedAt       int64          `json:"created_at"`
-	UpdatedAt       int64          `json:"updated_at"`
+	ETD             *time.Time      `json:"etd"`
+	Notes           []*Note         `json:"notes"`
+	CreatedAt       int64           `json:"created_at"`
+	UpdatedAt       int64           `json:"updated_at"`
 }
 
 type OrderItemRequest struct {
@@ -68,12 +68,12 @@ type AddNoteRequest struct {
 }
 
 type ListOrdersFilter struct {
-	WholesalerID string      `json:"wholesaler_id"`
-	DealerID     string      `json:"dealer_id"`
-	Status       OrderStatus `json:"status"`
-	PlacedByID   string      `json:"placed_by_id"`
-	Page         int         `json:"page"`
-	PageSize     int         `json:"page_size"`
+	TenantID    string      `json:"tenant_id"`
+	BuyerID     string      `json:"buyer_id"`
+	PlacedByID  string      `json:"placed_by_id"`
+	Status      OrderStatus `json:"status"`
+	Page        int         `json:"page"`
+	PageSize    int         `json:"page_size"`
 }
 
 type ListOrdersResponse struct {
@@ -82,5 +82,3 @@ type ListOrdersResponse struct {
 	Page     int      `json:"page"`
 	PageSize int      `json:"page_size"`
 }
-
-

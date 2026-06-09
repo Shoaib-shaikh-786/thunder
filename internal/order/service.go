@@ -18,33 +18,29 @@ func NewService(repo *Repository) *Service {
 
 // ── Create ────────────────────────────────────────────────────────────────────
 
-// CreateOrder is called by dealer or salesman.
-// placedByID   = the user placing the order (dealer or salesman)
-// placedByType = "dealer" | "salesman"
-// dealerID     = the dealer this order belongs to
-//
-//	(for dealer: same as placedByID's user record)
-//	(for salesman: taken from salesman's dealer_id claim)
+// CreateOrder is called by buyer or field agent.
+// placedByID   = the user placing the order
+// placedByType = "buyer" | "field_agent"
 func (s *Service) CreateOrder(
 	ctx context.Context,
-	wholesalerID, dealerID, placedByID, placedByType string,
+	tenantID, placedByID, placedByType string,
 	req CreateOrderRequest,
 ) (*Order, error) {
-	// Validate dealer has a saved address — required for shipping
-	addr, err := s.repo.GetUserAddress(ctx, dealerID)
+	// Validate the user placing the order has a saved address — required for shipping
+	addr, err := s.repo.GetUserAddress(ctx, placedByID)
 	if err != nil {
-		return nil, fmt.Errorf("fetch dealer address: %w", err)
+		return nil, fmt.Errorf("fetch user address: %w", err)
 	}
 	if addr == nil {
-		return nil, fmt.Errorf("dealer has no saved address; please update profile before placing an order")
+		return nil, fmt.Errorf("user has no saved address; please update profile before placing an order")
 	}
 
-	// Snapshot each product from the wholesaler's catalog
+	// Snapshot each product from the tenant's catalog
 	var items []*OrderItem
 	var orderValue int64
 
 	for _, reqItem := range req.Items {
-		snapshot, err := s.repo.GetProductSnapshot(ctx, reqItem.ProductID, wholesalerID)
+		snapshot, err := s.repo.GetProductSnapshot(ctx, reqItem.ProductID, tenantID)
 		if err != nil {
 			return nil, err
 		}
@@ -56,8 +52,8 @@ func (s *Service) CreateOrder(
 	now := time.Now().UnixMilli()
 	o := &Order{
 		ID:              uuid.New().String(),
-		WholesalerID:    wholesalerID,
-		DealerID:        dealerID,
+		TenantID:        tenantID,
+		BuyerID:         placedByID,
 		PlacedByID:      placedByID,
 		PlacedByType:    placedByType,
 		Status:          OrderStatusPending,
@@ -69,7 +65,7 @@ func (s *Service) CreateOrder(
 		UpdatedAt:       now,
 	}
 
-	// Attach delivery note if provided (salesman use case)
+	// Attach delivery note if provided
 	if req.Note != "" {
 		o.Notes = append(o.Notes, &Note{
 			AuthorID:   placedByID,
@@ -88,106 +84,106 @@ func (s *Service) CreateOrder(
 
 // ── Status Transitions ────────────────────────────────────────────────────────
 
-// AcceptOrder — Wholesaler only. Sets ETD at this point.
-func (s *Service) AcceptOrder(ctx context.Context, wholesalerID, orderID string, req AcceptOrderRequest) error {
-	o, err := s.getAndValidate(ctx, orderID, wholesalerID)
+// AcceptOrder — Admin only. Sets ETD at this point.
+func (s *Service) AcceptOrder(ctx context.Context, tenantID, orderID string, req AcceptOrderRequest) error {
+	o, err := s.getAndValidate(ctx, orderID, tenantID)
 	if err != nil {
 		return err
 	}
 	if o.Status != OrderStatusPending {
 		return fmt.Errorf("can only accept a pending order, current status: %s", o.Status)
 	}
-	return s.repo.UpdateStatus(ctx, orderID, wholesalerID, OrderStatusAccepted, req.ETD)
+	return s.repo.UpdateStatus(ctx, orderID, tenantID, OrderStatusAccepted, req.ETD)
 }
 
-// RejectOrder — Wholesaler only.
-func (s *Service) RejectOrder(ctx context.Context, wholesalerID, orderID string) error {
-	o, err := s.getAndValidate(ctx, orderID, wholesalerID)
+// RejectOrder — Admin only.
+func (s *Service) RejectOrder(ctx context.Context, tenantID, orderID string) error {
+	o, err := s.getAndValidate(ctx, orderID, tenantID)
 	if err != nil {
 		return err
 	}
 	if o.Status != OrderStatusPending {
 		return fmt.Errorf("can only reject a pending order, current status: %s", o.Status)
 	}
-	return s.repo.UpdateStatus(ctx, orderID, wholesalerID, OrderStatusRejected, nil)
+	return s.repo.UpdateStatus(ctx, orderID, tenantID, OrderStatusRejected, nil)
 }
 
-// CompleteOrder — Wholesaler only. Final state after shipped.
-func (s *Service) CompleteOrder(ctx context.Context, wholesalerID, orderID string) error {
-	o, err := s.getAndValidate(ctx, orderID, wholesalerID)
+// CompleteOrder — Admin only. Final state after shipped.
+func (s *Service) CompleteOrder(ctx context.Context, tenantID, orderID string) error {
+	o, err := s.getAndValidate(ctx, orderID, tenantID)
 	if err != nil {
 		return err
 	}
 	if o.Status != OrderStatusShipped {
 		return fmt.Errorf("can only complete a shipped order, current status: %s", o.Status)
 	}
-	return s.repo.UpdateStatus(ctx, orderID, wholesalerID, OrderStatusCompleted, nil)
+	return s.repo.UpdateStatus(ctx, orderID, tenantID, OrderStatusCompleted, nil)
 }
 
 // ProcessOrder — Staff only.
-func (s *Service) ProcessOrder(ctx context.Context, wholesalerID, orderID string) error {
-	o, err := s.getAndValidate(ctx, orderID, wholesalerID)
+func (s *Service) ProcessOrder(ctx context.Context, tenantID, orderID string) error {
+	o, err := s.getAndValidate(ctx, orderID, tenantID)
 	if err != nil {
 		return err
 	}
 	if o.Status != OrderStatusAccepted {
 		return fmt.Errorf("can only process an accepted order, current status: %s", o.Status)
 	}
-	return s.repo.UpdateStatus(ctx, orderID, wholesalerID, OrderStatusProcessing, nil)
+	return s.repo.UpdateStatus(ctx, orderID, tenantID, OrderStatusProcessing, nil)
 }
 
 // ShipOrder — Staff only.
-func (s *Service) ShipOrder(ctx context.Context, wholesalerID, orderID string) error {
-	o, err := s.getAndValidate(ctx, orderID, wholesalerID)
+func (s *Service) ShipOrder(ctx context.Context, tenantID, orderID string) error {
+	o, err := s.getAndValidate(ctx, orderID, tenantID)
 	if err != nil {
 		return err
 	}
 	if o.Status != OrderStatusProcessing {
 		return fmt.Errorf("can only ship a processing order, current status: %s", o.Status)
 	}
-	return s.repo.UpdateStatus(ctx, orderID, wholesalerID, OrderStatusShipped, nil)
+	return s.repo.UpdateStatus(ctx, orderID, tenantID, OrderStatusShipped, nil)
 }
 
-// CancelOrder — Dealer only, only from pending.
-func (s *Service) CancelOrder(ctx context.Context, wholesalerID, dealerID, orderID string) error {
-	o, err := s.getAndValidate(ctx, orderID, wholesalerID)
+// CancelOrder — Buyer only, only from pending.
+func (s *Service) CancelOrder(ctx context.Context, tenantID, buyerID, orderID string) error {
+	o, err := s.getAndValidate(ctx, orderID, tenantID)
 	if err != nil {
 		return err
 	}
-	if o.DealerID != dealerID {
-		return fmt.Errorf("order does not belong to this dealer")
+	if o.BuyerID != buyerID {
+		return fmt.Errorf("order does not belong to this user")
 	}
 	if o.Status != OrderStatusPending {
 		return fmt.Errorf("can only cancel a pending order, current status: %s", o.Status)
 	}
-	return s.repo.UpdateStatus(ctx, orderID, wholesalerID, OrderStatusCancelled, nil)
+	return s.repo.UpdateStatus(ctx, orderID, tenantID, OrderStatusCancelled, nil)
 }
 
 // ── Notes ─────────────────────────────────────────────────────────────────────
 
-// AddNote — Dealer only, any status.
-func (s *Service) AddNote(ctx context.Context, wholesalerID, dealerID, orderID string, req AddNoteRequest) error {
-	o, err := s.getAndValidate(ctx, orderID, wholesalerID)
+// AddNote — Buyer or field_agent only, any status.
+func (s *Service) AddNote(ctx context.Context, tenantID, authorID, authorType, orderID string, req AddNoteRequest) error {
+	o, err := s.getAndValidate(ctx, orderID, tenantID)
 	if err != nil {
 		return err
 	}
-	if o.DealerID != dealerID {
-		return fmt.Errorf("order does not belong to this dealer")
+	if o.BuyerID != authorID {
+		return fmt.Errorf("order does not belong to this user")
 	}
 
 	note := &Note{
-		AuthorID:   dealerID,
-		AuthorType: "dealer",
+		AuthorID:   authorID,
+		AuthorType: authorType,
 		Message:    req.Message,
 		CreatedAt:  time.Now().UnixMilli(),
 	}
-	return s.repo.AddNote(ctx, orderID, wholesalerID, note)
+	return s.repo.AddNote(ctx, orderID, tenantID, note)
 }
 
 // ── Read ──────────────────────────────────────────────────────────────────────
 
-func (s *Service) GetByID(ctx context.Context, wholesalerID, orderID string) (*Order, error) {
-	return s.getAndValidate(ctx, orderID, wholesalerID)
+func (s *Service) GetByID(ctx context.Context, tenantID, orderID string) (*Order, error) {
+	return s.getAndValidate(ctx, orderID, tenantID)
 }
 
 func (s *Service) List(ctx context.Context, f ListOrdersFilter) (*ListOrdersResponse, error) {
@@ -213,8 +209,8 @@ func (s *Service) List(ctx context.Context, f ListOrdersFilter) (*ListOrdersResp
 
 // ── Internal ──────────────────────────────────────────────────────────────────
 
-func (s *Service) getAndValidate(ctx context.Context, orderID, wholesalerID string) (*Order, error) {
-	o, err := s.repo.GetByID(ctx, orderID, wholesalerID)
+func (s *Service) getAndValidate(ctx context.Context, orderID, tenantID string) (*Order, error) {
+	o, err := s.repo.GetByID(ctx, orderID, tenantID)
 	if err != nil {
 		return nil, err
 	}

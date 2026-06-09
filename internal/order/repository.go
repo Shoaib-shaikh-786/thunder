@@ -39,7 +39,7 @@ func (r *Repository) Create(ctx context.Context, o *Order) error {
 
 	_, err = r.db.Exec(ctx, `
 		INSERT INTO orders (
-			id, wholesaler_id, dealer_id, placed_by_id, placed_by_type,
+			id, tenant_id, buyer_id, placed_by_id, placed_by_type,
 			status, items, order_value, shipping_address, etd, notes,
 			created_at, updated_at
 		) VALUES (
@@ -48,23 +48,23 @@ func (r *Repository) Create(ctx context.Context, o *Order) error {
 			$12, $13
 		)
 	`,
-		o.ID, o.WholesalerID, o.DealerID, o.PlacedByID, o.PlacedByType,
+		o.ID, o.TenantID, o.BuyerID, o.PlacedByID, o.PlacedByType,
 		o.Status, itemsJSON, o.OrderValue, addrJSON, o.ETD, notesJSON,
 		o.CreatedAt, o.UpdatedAt,
 	)
 	return err
 }
 
-func (r *Repository) UpdateStatus(ctx context.Context, id, wholesalerID string, status OrderStatus, etd *time.Time) error {
+func (r *Repository) UpdateStatus(ctx context.Context, id, tenantID string, status OrderStatus, etd *time.Time) error {
 	_, err := r.db.Exec(ctx, `
 		UPDATE orders
 		SET status = $1, etd = $2, updated_at = $3
-		WHERE id = $4 AND wholesaler_id = $5
-	`, status, etd, time.Now().UnixMilli(), id, wholesalerID)
+		WHERE id = $4 AND tenant_id = $5
+	`, status, etd, time.Now().UnixMilli(), id, tenantID)
 	return err
 }
 
-func (r *Repository) AddNote(ctx context.Context, id, wholesalerID string, note *Note) error {
+func (r *Repository) AddNote(ctx context.Context, id, tenantID string, note *Note) error {
 	noteJSON, err := json.Marshal(note)
 	if err != nil {
 		return fmt.Errorf("marshal note: %w", err)
@@ -74,33 +74,33 @@ func (r *Repository) AddNote(ctx context.Context, id, wholesalerID string, note 
 	_, err = r.db.Exec(ctx, `
 		UPDATE orders
 		SET notes = notes || $1::jsonb, updated_at = $2
-		WHERE id = $3 AND wholesaler_id = $4
-	`, fmt.Sprintf("[%s]", noteJSON), time.Now().UnixMilli(), id, wholesalerID)
+		WHERE id = $3 AND tenant_id = $4
+	`, fmt.Sprintf("[%s]", noteJSON), time.Now().UnixMilli(), id, tenantID)
 	return err
 }
 
 // ── Read ──────────────────────────────────────────────────────────────────────
 
-func (r *Repository) GetByID(ctx context.Context, id, wholesalerID string) (*Order, error) {
+func (r *Repository) GetByID(ctx context.Context, id, tenantID string) (*Order, error) {
 	row := r.db.QueryRow(ctx, `
-		SELECT id, wholesaler_id, dealer_id, placed_by_id, placed_by_type,
+		SELECT id, tenant_id, buyer_id, placed_by_id, placed_by_type,
 		       status, items, order_value, shipping_address, etd, notes,
 		       created_at, updated_at
 		FROM orders
-		WHERE id = $1 AND wholesaler_id = $2
-	`, id, wholesalerID)
+		WHERE id = $1 AND tenant_id = $2
+	`, id, tenantID)
 
 	return scanOrder(row)
 }
 
 func (r *Repository) List(ctx context.Context, f ListOrdersFilter) ([]*Order, int64, error) {
-	conditions := []string{"wholesaler_id = $1"}
-	args := []any{f.WholesalerID}
+	conditions := []string{"tenant_id = $1"}
+	args := []any{f.TenantID}
 	argIdx := 2
 
-	if f.DealerID != "" {
-		conditions = append(conditions, fmt.Sprintf("dealer_id = $%d", argIdx))
-		args = append(args, f.DealerID)
+	if f.BuyerID != "" {
+		conditions = append(conditions, fmt.Sprintf("buyer_id = $%d", argIdx))
+		args = append(args, f.BuyerID)
 		argIdx++
 	}
 	if f.Status != "" {
@@ -129,7 +129,7 @@ func (r *Repository) List(ctx context.Context, f ListOrdersFilter) ([]*Order, in
 	args = append(args, f.PageSize, offset)
 
 	rows, err := r.db.Query(ctx, fmt.Sprintf(`
-		SELECT id, wholesaler_id, dealer_id, placed_by_id, placed_by_type,
+		SELECT id, tenant_id, buyer_id, placed_by_id, placed_by_type,
 		       status, items, order_value, shipping_address, etd, notes,
 		       created_at, updated_at
 		FROM orders %s
@@ -176,14 +176,14 @@ func (r *Repository) GetUserAddress(ctx context.Context, userID string) (*domain
 }
 
 // GetProductSnapshot fetches name, price, unit from products for snapshotting.
-func (r *Repository) GetProductSnapshot(ctx context.Context, productID, wholesalerID string) (*OrderItem, error) {
+func (r *Repository) GetProductSnapshot(ctx context.Context, productID, tenantID string) (*OrderItem, error) {
 	item := &OrderItem{}
 	var unitStr *string
 	err := r.db.QueryRow(ctx, `
 		SELECT id, name, price, unit
 		FROM products
-		WHERE id = $1 AND wholesaler_id = $2
-	`, productID, wholesalerID).Scan(&item.ProductID, &item.Name, &item.Price, &unitStr)
+		WHERE id = $1 AND tenant_id = $2
+	`, productID, tenantID).Scan(&item.ProductID, &item.Name, &item.Price, &unitStr)
 	if err != nil {
 		if err == pgx.ErrNoRows {
 			return nil, fmt.Errorf("product %s not found", productID)
@@ -207,7 +207,7 @@ func scanOrder(row scannable) (*Order, error) {
 	var itemsJSON, addrJSON, notesJSON []byte
 
 	err := row.Scan(
-		&o.ID, &o.WholesalerID, &o.DealerID, &o.PlacedByID, &o.PlacedByType,
+		&o.ID, &o.TenantID, &o.BuyerID, &o.PlacedByID, &o.PlacedByType,
 		&o.Status, &itemsJSON, &o.OrderValue, &addrJSON, &o.ETD, &notesJSON,
 		&o.CreatedAt, &o.UpdatedAt,
 	)

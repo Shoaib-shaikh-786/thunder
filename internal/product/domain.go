@@ -10,7 +10,6 @@ import (
 type Product struct {
 	ID               string          `json:"id" gorm:"primaryKey;type:varchar(50)"`
 	TenantID         string          `json:"tenant_id" gorm:"type:varchar(50);not null;index;index:idx_tenant_sku,unique"`
-	WholesalerID     string          `json:"wholesaler_id" gorm:"type:varchar(50);not null;index"`
 	Name             string          `json:"name" gorm:"type:varchar(150);not null"`
 	SKU              string          `json:"sku" gorm:"type:varchar(50);not null;index:idx_tenant_sku,unique"`
 	Price            float64         `json:"price" gorm:"type:numeric(10,2);not null"`
@@ -58,11 +57,11 @@ type UpdateProductRequest struct {
 // ── Query / Filter ────────────────────────────────────────────────────────────
 
 type ListProductsFilter struct {
-	WholesalerID string // always injected from token claims, never from request body
-	Category     string // optional ?category=beverages
-	Search       string // optional ?search=sugar (matches name)
-	Page         int    // default 1
-	PageSize     int    // default 20, max 100
+	TenantID string // always injected from token claims, never from request body
+	Category string // optional ?category=beverages
+	Search   string // optional ?search=sugar (matches name)
+	Page     int    // default 1
+	PageSize int    // default 20, max 100
 }
 
 // ── Response DTOs ─────────────────────────────────────────────────────────────

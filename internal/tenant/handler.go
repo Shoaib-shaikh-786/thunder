@@ -1,26 +1,42 @@
 package tenant
 
 import (
-    "net/http"
+	"net/http"
 
-    "github.com/gin-gonic/gin"
+	"github.com/gin-gonic/gin"
 )
 
 type Handler struct {
-    service *Service
+	service *Service
 }
 
 func NewHandler(service *Service) *Handler {
-    return &Handler{service: service}
+	return &Handler{service: service}
 }
 
 func (h *Handler) RegisterRoutes(r *gin.RouterGroup) {
-    tenant := r.Group("/tenants")
-    {
-        tenant.GET("/:id", h.GetTenant)
-    }
+	tenant := r.Group("/tenants")
+	{
+		tenant.GET("/verify", h.VerifyTenant)
+	}
 }
 
-func (h *Handler) GetTenant(c *gin.Context) {
-    c.JSON(http.StatusNotImplemented, gin.H{"error": "tenant routes not implemented"})
+func (h *Handler) VerifyTenant(c *gin.Context) {
+	slug := c.Query("slug")
+	if slug == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "slug is required"})
+		return
+	}
+
+	tenant, err := h.service.GetByID(c.Request.Context(), slug)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	if tenant == nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "tenant not found"})
+		return
+	}
+
+	c.JSON(http.StatusOK, tenant)
 }

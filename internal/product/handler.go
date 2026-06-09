@@ -24,7 +24,7 @@ func (h *Handler) RegisterRoutes(r *gin.RouterGroup) {
 		products.GET("", h.List)
 		products.GET("/:id", h.GetByID)
 
-		// WRITE — wholesaler only
+		// WRITE — admin only
 		products.POST("", h.Create)
 		products.PATCH("/:id", h.Update)
 		products.DELETE("/:id", h.Delete)
@@ -42,11 +42,11 @@ func (h *Handler) List(c *gin.Context) {
 	pageSize, _ := strconv.Atoi(c.DefaultQuery("page_size", "20"))
 
 	filter := ListProductsFilter{
-		WholesalerID: claims.WholesalerID, // always scoped to the user's wholesaler
-		Category:     c.Query("category"),
-		Search:       c.Query("search"),
-		Page:         page,
-		PageSize:     pageSize,
+		TenantID: claims.TenantID, // always scoped to the user's tenant
+		Category: c.Query("category"),
+		Search:   c.Query("search"),
+		Page:     page,
+		PageSize: pageSize,
 	}
 
 	resp, err := h.service.List(c.Request.Context(), filter)
@@ -65,7 +65,7 @@ func (h *Handler) GetByID(c *gin.Context) {
 		return
 	}
 
-	p, err := h.service.GetByID(c.Request.Context(), claims.WholesalerID, c.Param("id"))
+	p, err := h.service.GetByID(c.Request.Context(), claims.TenantID, c.Param("id"))
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
 		return
@@ -74,13 +74,13 @@ func (h *Handler) GetByID(c *gin.Context) {
 	c.JSON(http.StatusOK, p)
 }
 
-// POST /products — wholesaler only
+// POST /products — admin only
 func (h *Handler) Create(c *gin.Context) {
 	claims := mustGetClaims(c)
 	if claims == nil {
 		return
 	}
-	if !isWholesaler(c, claims) {
+	if !isAdmin(c, claims) {
 		return
 	}
 
@@ -90,7 +90,7 @@ func (h *Handler) Create(c *gin.Context) {
 		return
 	}
 
-	p, err := h.service.Create(c.Request.Context(), claims.UserID, req)
+	p, err := h.service.Create(c.Request.Context(), claims.TenantID, req)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -99,13 +99,13 @@ func (h *Handler) Create(c *gin.Context) {
 	c.JSON(http.StatusCreated, p)
 }
 
-// PATCH /products/:id — wholesaler only
+// PATCH /products/:id — admin only
 func (h *Handler) Update(c *gin.Context) {
 	claims := mustGetClaims(c)
 	if claims == nil {
 		return
 	}
-	if !isWholesaler(c, claims) {
+	if !isAdmin(c, claims) {
 		return
 	}
 
@@ -115,7 +115,7 @@ func (h *Handler) Update(c *gin.Context) {
 		return
 	}
 
-	if err := h.service.Update(c.Request.Context(), claims.UserID, c.Param("id"), req); err != nil {
+	if err := h.service.Update(c.Request.Context(), claims.TenantID, c.Param("id"), req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
@@ -123,17 +123,17 @@ func (h *Handler) Update(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "product updated"})
 }
 
-// DELETE /products/:id — wholesaler only
+// DELETE /products/:id — admin only
 func (h *Handler) Delete(c *gin.Context) {
 	claims := mustGetClaims(c)
 	if claims == nil {
 		return
 	}
-	if !isWholesaler(c, claims) {
+	if !isAdmin(c, claims) {
 		return
 	}
 
-	if err := h.service.Delete(c.Request.Context(), claims.UserID, c.Param("id")); err != nil {
+	if err := h.service.Delete(c.Request.Context(), claims.TenantID, c.Param("id")); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
@@ -157,9 +157,9 @@ func mustGetClaims(c *gin.Context) *auth.Claims {
 	return claims
 }
 
-func isWholesaler(c *gin.Context, claims *auth.Claims) bool {
-	if claims.Type != "wholesaler" {
-		c.JSON(http.StatusForbidden, gin.H{"error": "only wholesalers can perform this action"})
+func isAdmin(c *gin.Context, claims *auth.Claims) bool {
+	if claims.Type != "admin" {
+		c.JSON(http.StatusForbidden, gin.H{"error": "only admins can perform this action"})
 		return false
 	}
 	return true

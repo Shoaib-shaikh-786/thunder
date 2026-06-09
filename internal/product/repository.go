@@ -34,7 +34,7 @@ func (r *Repository) Create(ctx context.Context, p *Product) error {
 
 	_, err = r.db.Exec(ctx, `
 		INSERT INTO products (
-			id, wholesaler_id, name, quantity, category,
+			id, tenant_id, name, quantity, category,
 			unit, price, description, images, physical_attributes,
 			created_at, updated_at
 		) VALUES (
@@ -43,14 +43,14 @@ func (r *Repository) Create(ctx context.Context, p *Product) error {
 			$11, $12
 		)
 	`,
-		p.ID, p.WholesalerID, p.Name, p.Quantity, p.Category,
+		p.ID, p.TenantID, p.Name, p.Quantity, p.Category,
 		p.Unit, p.Price, p.Description, imagesJSON, physJSON,
 		p.CreatedAt, p.UpdatedAt,
 	)
 	return err
 }
 
-func (r *Repository) Update(ctx context.Context, id, wholesalerID string, req UpdateProductRequest) error {
+func (r *Repository) Update(ctx context.Context, id, tenantID string, req UpdateProductRequest) error {
 	// Build query dynamically — only update provided fields
 	setClauses := []string{}
 	args := []any{}
@@ -114,10 +114,10 @@ func (r *Repository) Update(ctx context.Context, id, wholesalerID string, req Up
 	args = append(args, time.Now().UnixMilli())
 	argIdx++
 
-	// WHERE id = $N AND wholesaler_id = $N+1 (prevents cross-wholesaler edits)
-	args = append(args, id, wholesalerID)
+	// WHERE id = $N AND tenant_id = $N+1 (prevents cross-tenant edits)
+	args = append(args, id, tenantID)
 	query := fmt.Sprintf(
-		"UPDATE products SET %s WHERE id = $%d AND wholesaler_id = $%d",
+		"UPDATE products SET %s WHERE id = $%d AND tenant_id = $%d",
 		strings.Join(setClauses, ", "), argIdx, argIdx+1,
 	)
 
@@ -126,42 +126,42 @@ func (r *Repository) Update(ctx context.Context, id, wholesalerID string, req Up
 		return fmt.Errorf("update product: %w", err)
 	}
 	if result.RowsAffected() == 0 {
-		return fmt.Errorf("product not found or not owned by wholesaler")
+		return fmt.Errorf("product not found or not owned by tenant")
 	}
 	return nil
 }
 
-func (r *Repository) Delete(ctx context.Context, id, wholesalerID string) error {
+func (r *Repository) Delete(ctx context.Context, id, tenantID string) error {
 	result, err := r.db.Exec(ctx,
-		`DELETE FROM products WHERE id = $1 AND wholesaler_id = $2`,
-		id, wholesalerID,
+		`DELETE FROM products WHERE id = $1 AND tenant_id = $2`,
+		id, tenantID,
 	)
 	if err != nil {
 		return fmt.Errorf("delete product: %w", err)
 	}
 	if result.RowsAffected() == 0 {
-		return fmt.Errorf("product not found or not owned by wholesaler")
+		return fmt.Errorf("product not found or not owned by tenant")
 	}
 	return nil
 }
 
 // ── Read ──────────────────────────────────────────────────────────────────────
 
-func (r *Repository) GetByID(ctx context.Context, id, wholesalerID string) (*Product, error) {
+func (r *Repository) GetByID(ctx context.Context, id, tenantID string) (*Product, error) {
 	row := r.db.QueryRow(ctx, `
-		SELECT id, wholesaler_id, name, quantity, category,
+		SELECT id, tenant_id, name, quantity, category,
 		       unit, price, description, images, physical_attributes,
 		       created_at, updated_at
 		FROM products
-		WHERE id = $1 AND wholesaler_id = $2
-	`, id, wholesalerID)
+		WHERE id = $1 AND tenant_id = $2
+	`, id, tenantID)
 
 	return scanProduct(row)
 }
 
 func (r *Repository) List(ctx context.Context, f ListProductsFilter) ([]*Product, int64, error) {
-	conditions := []string{"wholesaler_id = $1"}
-	args := []any{f.WholesalerID}
+	conditions := []string{"tenant_id = $1"}
+	args := []any{f.TenantID}
 	argIdx := 2
 
 	if f.Category != "" {
@@ -191,7 +191,7 @@ func (r *Repository) List(ctx context.Context, f ListProductsFilter) ([]*Product
 	offset := (f.Page - 1) * f.PageSize
 	args = append(args, f.PageSize, offset)
 	rows, err := r.db.Query(ctx, fmt.Sprintf(`
-		SELECT id, wholesaler_id, name, quantity, category,
+		SELECT id, tenant_id, name, quantity, category,
 		       unit, price, description, images, physical_attributes,
 		       created_at, updated_at
 		FROM products %s
@@ -228,7 +228,7 @@ func scanProduct(row scannable) (*Product, error) {
 	var physJSON []byte
 
 	err := row.Scan(
-		&p.ID, &p.WholesalerID, &p.Name, &p.Quantity, &p.Category,
+		&p.ID, &p.TenantID, &p.Name, &p.Quantity, &p.Category,
 		&unitStr, &p.Price, &p.Description, &imagesJSON, &physJSON,
 		&p.CreatedAt, &p.UpdatedAt,
 	)
