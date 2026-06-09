@@ -195,7 +195,7 @@ func (s *Service) UpdateDealer(ctx context.Context, claims *Claims, targetID str
 	// For wholesalers, scope the update to their dealer. For dealers updating
 	// themselves, wholesalerID scoping is implicit (targetID == claims.UserID).
 	wholesalerID := ""
-	if claims.Type == UserTypeWholesaler {
+	if claims.Type == string(UserTypeWholesaler) {
 		wholesalerID = claims.UserID
 	}
 

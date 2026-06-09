@@ -21,15 +21,15 @@ func (s *Service) Create(ctx context.Context, wholesalerID string, req CreatePro
 		ID:                 uuid.New().String(),
 		WholesalerID:       wholesalerID, // always from token, never from request
 		Name:               req.Name,
-		Quantity:           req.Quantity,
+		Quantity:           int(req.Quantity),
 		Category:           req.Category,
 		Unit:               req.Unit,
-		Price:              req.Price,
+		Price:              float64(req.Price),
 		Description:        req.Description,
 		Images:             req.Images,
 		PhysicalAttributes: req.PhysicalAttributes,
-		CreatedAt:          time.Now().UnixMilli(),
-		UpdatedAt:          time.Now().UnixMilli(),
+		CreatedAt:          time.Now(),
+		UpdatedAt:          time.Now(),
 	}
 
 	if err := s.repo.Create(ctx, p); err != nil {

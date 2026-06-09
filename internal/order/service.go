@@ -97,7 +97,7 @@ func (s *Service) AcceptOrder(ctx context.Context, wholesalerID, orderID string,
 	if o.Status != OrderStatusPending {
 		return fmt.Errorf("can only accept a pending order, current status: %s", o.Status)
 	}
-	return s.repo.UpdateStatus(ctx, orderID, wholesalerID, OrderStatusAccepted, &req.ETD)
+	return s.repo.UpdateStatus(ctx, orderID, wholesalerID, OrderStatusAccepted, req.ETD)
 }
 
 // RejectOrder — Wholesaler only.

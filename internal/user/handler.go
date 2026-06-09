@@ -16,7 +16,7 @@ func NewHandler(service *Service) *Handler {
 }
 
 // RegisterRoutes mounts all auth + user routes onto the router.
-func (h *Handler) RegisterRoutes(r *gin.Engine) {
+func (h *Handler) RegisterRoutes(r *gin.RouterGroup) {
 	auth := r.Group("/auth")
 	{
 		auth.POST("/login", h.Login)
@@ -75,7 +75,7 @@ func (h *Handler) GenerateInvite(c *gin.Context) {
 		return
 	}
 
-	if claims.Type != UserTypeWholesaler {
+	if claims.Type != string(UserTypeWholesaler) {
 		c.JSON(http.StatusForbidden, gin.H{"error": "only wholesalers can generate invites"})
 		return
 	}
@@ -127,7 +127,7 @@ func (h *Handler) CreateSalesman(c *gin.Context) {
 	if !ok {
 		return
 	}
-	if claims.Type != UserTypeWholesaler {
+	if claims.Type != string(UserTypeWholesaler) {
 		c.JSON(http.StatusForbidden, gin.H{"error": "wholesalers only"})
 		return
 	}
@@ -152,7 +152,7 @@ func (h *Handler) DeleteSalesman(c *gin.Context) {
 	if !ok {
 		return
 	}
-	if claims.Type != UserTypeWholesaler {
+	if claims.Type != string(UserTypeWholesaler) {
 		c.JSON(http.StatusForbidden, gin.H{"error": "wholesalers only"})
 		return
 	}
@@ -174,7 +174,7 @@ func (h *Handler) CreateStaff(c *gin.Context) {
 	if !ok {
 		return
 	}
-	if claims.Type != UserTypeWholesaler {
+	if claims.Type != string(UserTypeWholesaler) {
 		c.JSON(http.StatusForbidden, gin.H{"error": "wholesalers only"})
 		return
 	}
@@ -199,7 +199,7 @@ func (h *Handler) DeleteStaff(c *gin.Context) {
 	if !ok {
 		return
 	}
-	if claims.Type != UserTypeWholesaler {
+	if claims.Type != string(UserTypeWholesaler) {
 		c.JSON(http.StatusForbidden, gin.H{"error": "wholesalers only"})
 		return
 	}
@@ -225,13 +225,13 @@ func (h *Handler) UpdateDealer(c *gin.Context) {
 	targetID := c.Param("id")
 
 	// Dealers can only update themselves
-	if claims.Type == UserTypeDealer && claims.UserID != targetID {
+	if claims.Type == string(UserTypeDealer) && claims.UserID != targetID {
 		c.JSON(http.StatusForbidden, gin.H{"error": "dealers can only update their own profile"})
 		return
 	}
 
 	// Salesmen/staff cannot update dealers
-	if claims.Type != UserTypeWholesaler && claims.Type != UserTypeDealer {
+	if claims.Type != string(UserTypeWholesaler) && claims.Type != string(UserTypeDealer) {
 		c.JSON(http.StatusForbidden, gin.H{"error": "forbidden"})
 		return
 	}
